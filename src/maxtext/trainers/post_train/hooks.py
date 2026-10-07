@@ -15,7 +15,6 @@
 """Shared training and data loading hooks for post-training."""
 
 from collections import defaultdict
-import abc
 from typing import override
 
 import jax
@@ -38,13 +37,13 @@ from maxtext.utils import max_utils
 from maxtext.utils import sharding
 
 
-class BaseTrainingHooks(TrainingHooks, abc.ABC):
+class BaseTrainingHooks(TrainingHooks):
   """Shared training hooks for post-training."""
 
-  def __init__(self, config, mesh, learning_rate_schedule, goodput_recorder):
+  def __init__(self, config, mesh=None, learning_rate_schedule=None, goodput_recorder=None):
     self.config = config
     self.mesh = mesh
-    self.metric_logger = MetricLogger(self.config, learning_rate_schedule)
+    self.metric_logger = MetricLogger(self.config, learning_rate_schedule) if learning_rate_schedule is not None else None
     self.goodput_recorder = goodput_recorder
     self.metadata = {}
     self.train_metadata = defaultdict(float)
@@ -54,6 +53,11 @@ class BaseTrainingHooks(TrainingHooks, abc.ABC):
   @override
   def on_train_start(self, train_ctx: peft_trainer.PeftTrainer):
     """Called at the beginning of training."""
+    if self.metric_logger is None:
+      self.metadata["first_train_step"] = train_ctx.train_steps
+      self.step_start_time = time.perf_counter()
+      return
+
     state = nnx.state(train_ctx.model)
     params = state.filter(nnx.Param)
 
@@ -80,18 +84,27 @@ class BaseTrainingHooks(TrainingHooks, abc.ABC):
   @override
   def on_train_end(self, train_ctx: peft_trainer.PeftTrainer):  # pylint: disable=unused-argument
     """Called at the end of training."""
+    if self.metric_logger is None:
+      return
+
     assert (
         "first_train_step" in self.metadata
     ), "BaseTrainingHooks.on_train_start() must be called before BaseTrainingHooks.on_train_end()"
 
-    if self.metric_logger:
-      self.metric_logger.flush_metrics_and_cleanup()
+    self.metric_logger.flush_metrics_and_cleanup()
 
   @override
   def on_train_step_start(self, train_ctx: peft_trainer.PeftTrainer):
     """Called at the beginning of a training step."""
-    if self.config.enable_goodput_recording:
-      record_goodput(self.goodput_recorder, f"record_{GoodputEvent.STEP.value}_start_time", train_ctx.train_steps)
+    if getattr(self.config, "enable_goodput_recording", False):
+      record_goodput(
+          self.goodput_recorder,
+          f"record_{GoodputEvent.STEP.value}_start_time",
+          train_ctx.train_steps,
+      )
+
+    if self.metric_logger is None:
+      return
 
     # Calculate the number of non-padded tokens in the batch
     self.train_metadata[train_ctx.train_steps] = {
@@ -107,6 +120,9 @@ class BaseTrainingHooks(TrainingHooks, abc.ABC):
       step_time: float = 0.0,  # No longer provided. See https://github.com/google/tunix/pull/1289.
   ):
     """Called at the end of training step."""
+    if self.metric_logger is None:
+      return
+
     # This hook is called by Tunix after the step counter has been incremented for logging purposes.
     # Therefore, using `train_step - 1` to refer to the state of the previous step counter.
     # However, we will use the current `train_step` value to record metrics in this hook to be
@@ -152,12 +168,18 @@ class BaseTrainingHooks(TrainingHooks, abc.ABC):
   @override
   def on_eval_step_start(self, train_ctx: peft_trainer.PeftTrainer):
     """Called at the beginning of an evaluation step."""
+    if self.metric_logger is None:
+      return
+
     self.eval_metadata["eval_step_count"] += 1.0
     self.eval_metadata["total_weights"] += self.get_total_weights(train_ctx.data_hooks.eval_batch)
 
   @override
   def on_eval_step_end(self, train_ctx: peft_trainer.PeftTrainer, eval_loss: float):
     """Called at the end of evaluation step."""
+    if self.metric_logger is None:
+      return
+
     assert (
         self.eval_metadata["eval_step_count"] != 0
     ), "BaseTrainingHooks.on_eval_step_start() must be called before BaseTrainingHooks.on_eval_step_end()"
@@ -199,9 +221,9 @@ class BaseTrainingHooks(TrainingHooks, abc.ABC):
     """Whether Tunix supplies a cross-batch weighted mean to the eval hook."""
     return False
 
-  @abc.abstractmethod
   def get_total_weights(self, batch) -> jax.Array:
     """Calculate the number of non-padded tokens in the batch."""
+    raise NotImplementedError
 
 
 class BaseDataHooks(DataHooks):

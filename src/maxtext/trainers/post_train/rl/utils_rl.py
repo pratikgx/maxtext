@@ -14,6 +14,7 @@
 
 # pylint: disable=bare-except, consider-using-generator, chained-comparison, broad-exception-caught
 """RL Utils Module."""
+
 import importlib.util
 import itertools
 import json
@@ -33,7 +34,6 @@ from tunix.rl.agentic.parser.chat_template_parser import parser as agentic_chat_
 
 from maxtext.trainers.post_train.rl.math_verify_pool import math_verify_pool, verify_math_worker
 from maxtext.utils import max_logging
-
 
 EPSILON = 1e-6
 
@@ -354,7 +354,11 @@ def fix_latex_escaping(text: str) -> str:
       ("\t", "extbf", r"\textbf"),  # \t (tab) → \textbf
       ("\t", "extit", r"\textit"),  # \t (tab) → \textit  # codespell:ignore
       ("\r", "ightarrow", r"\rightarrow"),  # \r (carriage return) → \rightarrow
-      ("\r", "ightarrow", r"\Rightarrow"),  # \r (carriage return) → \Rightarrow (capital R handled separately)
+      (
+          "\r",
+          "ightarrow",
+          r"\Rightarrow",
+      ),  # \r (carriage return) → \Rightarrow (capital R handled separately)
       ("\b", "eta", r"\beta"),  # \b (backspace) → \beta
       ("\b", "ar", r"\bar"),  # \b (backspace) → \bar
       ("\b", "inom", r"\binom"),  # \b (backspace) → \binom
@@ -433,7 +437,11 @@ def fix_latex_escaping(text: str) -> str:
 
 
 def check_numbers(
-    prompts: list[str], completions: list[str], answer: list[str], tmvp_config: Any, **kargs: Any
+    prompts: list[str],
+    completions: list[str],
+    answer: list[str],
+    tmvp_config: Any,
+    **kargs: Any,
 ) -> list[float]:
   """
   Reward the model if the answer is correct using math_verify for robust comparison.
@@ -591,7 +599,11 @@ def check_correctness(extracted_response: str, acceptable_answers: list[str], tm
     predictions = parse(boxed(norm_response), (ExprExtractionConfig(), LatexExtractionConfig()))
     golds = list(
         itertools.chain.from_iterable(
-            parse(boxed(norm_answer), (ExprExtractionConfig(), LatexExtractionConfig())) for norm_answer in norm_answers
+            parse(
+                boxed(norm_answer),
+                (ExprExtractionConfig(), LatexExtractionConfig()),
+            )
+            for norm_answer in norm_answers
         )
     )
     is_partially_correct = any(
@@ -857,7 +869,9 @@ class MaxTextChatParser(agentic_chat_template_parser.DefaultChatTemplateParser):
 
     # Delegate to Tunix default parser to apply the tokenizer's chat template
     return super().parse(
-        messages=formatted_messages, add_generation_prompt=add_generation_prompt, is_first_msg=is_first_msg
+        messages=formatted_messages,
+        add_generation_prompt=add_generation_prompt,
+        is_first_msg=is_first_msg,
     )
 
 
@@ -866,20 +880,22 @@ def install_training_hooks(
     trainer_config: Any,
     test_dataset: Any,
     reward_fns: Optional[list[Callable[..., Any]]] = None,
+    goodput_recorder: Any = None,
 ) -> None:
-  """Install maxtext's `RLTrainingHooks` on the actor trainer.
+  """Attach `RLTrainingHooks` to `rl_cluster.actor_trainer` if enabled.
 
   When `reward_fns` is provided, intermediate eval logs the per-example
   `mean_reward` alongside the correctness metrics, mirroring the training-time
   reward stack.
 
-  No-op if `eval_interval <= 0` or `num_test_batches <= 0` or tunix's hooks
-  module is unavailable.
+  No-op if both intermediate eval (`eval_interval > 0` and `num_test_batches > 0`)
+  and `enable_goodput_recording` are disabled, or if tunix's hooks module is unavailable.
   """
-  if trainer_config.num_test_batches <= 0:
-    return
   eval_interval = int(getattr(trainer_config, "eval_interval", 0))
-  if eval_interval <= 0:
+  num_test_batches = int(getattr(trainer_config, "num_test_batches", 0))
+  eval_enabled = num_test_batches > 0 and eval_interval > 0
+  goodput_enabled = bool(getattr(trainer_config, "enable_goodput_recording", False))
+  if not eval_enabled and not goodput_enabled:
     return
   try:
     # `hooks` hard-imports `tunix.sft.hooks`. If that's missing (stock-only
@@ -894,7 +910,14 @@ def install_training_hooks(
   try:
     actor = rl_cluster.actor_trainer
     if getattr(actor, "training_hooks", None) is None:
-      actor.training_hooks = RLTrainingHooks(rl_cluster, trainer_config, test_dataset, eval_interval, reward_fns)
+      actor.training_hooks = RLTrainingHooks(
+          rl_cluster,
+          trainer_config,
+          test_dataset,
+          eval_interval,
+          reward_fns,
+          goodput_recorder=goodput_recorder,
+      )
       max_logging.warning(
           f"[intermediate-eval] hook installed: evaluate(...) will fire every {eval_interval} outer steps."
       )

@@ -40,7 +40,6 @@ from maxtext.trainers.post_train.distillation import distillation_utils
 from maxtext.configs import pyconfig
 from tests.utils.test_helpers import get_test_config_path
 
-
 DEFAULT_DATA_SHARDING = [
     "data",
     "stage",
@@ -114,7 +113,10 @@ class TrainDistillTest(unittest.TestCase):
     # 3. Verify SFT fields are passed through
     self.assertIsInstance(tunix_input_sft, distillation_utils.MaxTextTrainingInput)
     np.testing.assert_array_equal(tunix_input_sft.targets_position, dummy_batch_sft["targets_position"])
-    np.testing.assert_array_equal(tunix_input_sft.targets_segmentation, dummy_batch_sft["targets_segmentation"])
+    np.testing.assert_array_equal(
+        tunix_input_sft.targets_segmentation,
+        dummy_batch_sft["targets_segmentation"],
+    )
 
   def test_maxtext_to_tunix_iterator_packed_fallback(self):
     """Verifies fallback behavior when segmentation is missing."""
@@ -166,7 +168,13 @@ class TrainDistillTest(unittest.TestCase):
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.nnx.split")
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.jax.value_and_grad")
   def test_train_step_skips_teacher_forward_when_output_present(
-      self, mock_value_and_grad, mock_split, mock_merge, mock_update, mock_tree_map, mock_global_norm
+      self,
+      mock_value_and_grad,
+      mock_split,
+      mock_merge,
+      mock_update,
+      mock_tree_map,
+      mock_global_norm,
   ):
     """Verifies teacher forward is skipped when model_output is already in the batch."""
     # 1. Initialize Trainer
@@ -192,7 +200,11 @@ class TrainDistillTest(unittest.TestCase):
     optimizer, inputs = mock.Mock(), mock.Mock()
 
     # 4. Configure nnx.split/merge/update mocks
-    mock_graphdef, mock_diff_params, mock_rest = mock.Mock(), mock.Mock(), mock.Mock()
+    mock_graphdef, mock_diff_params, mock_rest = (
+        mock.Mock(),
+        mock.Mock(),
+        mock.Mock(),
+    )
     mock_split.return_value = (mock_graphdef, mock_diff_params, mock_rest)
 
     # 5. Configure mocked jax.value_and_grad
@@ -229,7 +241,13 @@ class TrainDistillTest(unittest.TestCase):
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.nnx.split")
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.jax.value_and_grad")
   def test_train_step_calls_teacher_forward_when_output_missing(
-      self, mock_value_and_grad, mock_split, mock_merge, mock_update, mock_tree_map, mock_global_norm
+      self,
+      mock_value_and_grad,
+      mock_split,
+      mock_merge,
+      mock_update,
+      mock_tree_map,
+      mock_global_norm,
   ):
     """Verifies teacher forward is called when model_output is missing from the batch."""
     # 1. Initialize Trainer
@@ -255,7 +273,11 @@ class TrainDistillTest(unittest.TestCase):
     optimizer, inputs = mock.Mock(), mock.Mock()
 
     # 4. Configure nnx.split/merge/update mocks
-    mock_graphdef, mock_diff_params, mock_rest = mock.Mock(), mock.Mock(), mock.Mock()
+    mock_graphdef, mock_diff_params, mock_rest = (
+        mock.Mock(),
+        mock.Mock(),
+        mock.Mock(),
+    )
     mock_split.return_value = (mock_graphdef, mock_diff_params, mock_rest)
 
     # 5. Configure mocked jax.value_and_grad
@@ -317,7 +339,13 @@ class TrainDistillTest(unittest.TestCase):
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.nnx.split")
   @mock.patch("maxtext.trainers.post_train.distillation.train_distill.jax.value_and_grad")
   def test_train_step_passes_targets_segmentation(
-      self, mock_value_and_grad, mock_split, mock_merge, mock_update, mock_tree_map, mock_global_norm
+      self,
+      mock_value_and_grad,
+      mock_split,
+      mock_merge,
+      mock_update,
+      mock_tree_map,
+      mock_global_norm,
   ):
     """Verifies strategy callbacks receive decoder_target_tokens and decoder_target_mask."""
     # 1. Initialize Trainer
@@ -344,7 +372,11 @@ class TrainDistillTest(unittest.TestCase):
     optimizer, inputs = mock.Mock(), mock.Mock()
 
     # 4. Configure nnx.split/merge/update mocks
-    mock_graphdef, mock_diff_params, mock_rest = mock.Mock(), mock.Mock(), mock.Mock()
+    mock_graphdef, mock_diff_params, mock_rest = (
+        mock.Mock(),
+        mock.Mock(),
+        mock.Mock(),
+    )
     mock_split.return_value = (mock_graphdef, mock_diff_params, mock_rest)
 
     # 5. Configure mocked jax.value_and_grad
@@ -413,7 +445,10 @@ class TrainDistillTest(unittest.TestCase):
     # Verify InjectHyperparamsState is the top-level state (required for Tunix logging)
     # Note: When injecting a schedule (callable), optax returns InjectStatefulHyperparamsState
     self.assertTrue(
-        isinstance(state, (optax.InjectHyperparamsState, optax.InjectStatefulHyperparamsState)),
+        isinstance(
+            state,
+            (optax.InjectHyperparamsState, optax.InjectStatefulHyperparamsState),
+        ),
         f"State is {type(state)}, expected InjectHyperparamsState or InjectStatefulHyperparamsState",
     )
     self.assertIn("learning_rate", state.hyperparams)
@@ -505,7 +540,8 @@ class TrainDistillTest(unittest.TestCase):
     )
     # Case where feature loss is enabled
     logits = distillation_utils.DistillationForwardOutput(
-        logits=jnp.array([[[10.0, 0.0]]]), out_projection_activations=np.ones((32, 1, 1, 8))
+        logits=jnp.array([[[10.0, 0.0]]]),
+        out_projection_activations=np.ones((32, 1, 1, 8)),
     )
     labels = jnp.array([[[1.0, 0.0]]])
 
@@ -555,7 +591,15 @@ class TrainDistillTest(unittest.TestCase):
     student_output = distillation_utils.DistillationForwardOutput(logits=s_logits, out_projection_activations=None)
 
     # Teacher perfectly predicts the target for Token 0 and Token 2, and class 1 for Token 1
-    t_logits = jnp.array([[[-10.0, -10.0, 10.0, -10.0], [10.0, -10.0, -10.0, -10.0], [-10.0, -10.0, -10.0, 10.0]]])
+    t_logits = jnp.array(
+        [
+            [
+                [-10.0, -10.0, 10.0, -10.0],
+                [10.0, -10.0, -10.0, -10.0],
+                [-10.0, -10.0, -10.0, 10.0],
+            ]
+        ]
+    )
     teacher_output = distillation_utils.DistillationForwardOutput(logits=t_logits, out_projection_activations=None)
 
     # 3. Call compute_loss()
@@ -623,7 +667,8 @@ class TrainDistillTest(unittest.TestCase):
 
     # We need to mock the constructor of MaxTextCheckpointManager to return our mock
     with mock.patch(
-        "maxtext.trainers.post_train.distillation.distillation_utils.MaxTextCheckpointManager", return_value=mock_manager
+        "maxtext.trainers.post_train.distillation.distillation_utils.MaxTextCheckpointManager",
+        return_value=mock_manager,
     ):
 
       mock_trainer.model = mock.Mock()
@@ -830,7 +875,9 @@ class TrainDistillTest(unittest.TestCase):
 
     # Verify weights are completely UNCHANGED
     np.testing.assert_allclose(
-        student.linear.kernel.get_value(), initial_weights, err_msg="Weights should not update on the first pass."
+        student.linear.kernel.get_value(),
+        initial_weights,
+        err_msg="Weights should not update on the first pass.",
     )
 
     # --- EXECUTE PASS 2 ---
@@ -918,16 +965,29 @@ class TrainDistillTest(unittest.TestCase):
     # Check that step 2 checkpoint was written
     # The checkpoints should be stored in {test_dir}/distill_resume_test/checkpoints
     checkpoint_dir = os.path.join(self.test_dir, "distill_resume_test", "checkpoints")
-    self.assertTrue(os.path.exists(checkpoint_dir), f"Checkpoint directory {checkpoint_dir} not found")
+    self.assertTrue(
+        os.path.exists(checkpoint_dir),
+        f"Checkpoint directory {checkpoint_dir} not found",
+    )
 
     # List contents of checkpoint dir
     checkpoints = os.listdir(checkpoint_dir)
     # Checkpoints are usually named '0/', '1/', etc.
     # With steps=1 and steps=2 and checkpoint_period=1, we should have '1' and '2' (or similar).
-    self.assertTrue(any(c == "1" or c.endswith("1") for c in checkpoints), f"Checkpoint 1 not found in {checkpoints}")
-    self.assertTrue(any(c == "2" or c.endswith("2") for c in checkpoints), f"Checkpoint 2 not found in {checkpoints}")
+    self.assertTrue(
+        any(c == "1" or c.endswith("1") for c in checkpoints),
+        f"Checkpoint 1 not found in {checkpoints}",
+    )
+    self.assertTrue(
+        any(c == "2" or c.endswith("2") for c in checkpoints),
+        f"Checkpoint 2 not found in {checkpoints}",
+    )
 
-  @mock.patch.object(distillation_utils, "calculate_distillation_tflops_per_device", return_value=(0.0, 0.0, 0.0))
+  @mock.patch.object(
+      distillation_utils,
+      "calculate_distillation_tflops_per_device",
+      return_value=(0.0, 0.0, 0.0),
+  )
   def test_checkpointing_and_resume(self, _mock_tflops):
     """Trains a few steps, saves a checkpoint, and resumes from it."""
 
@@ -947,7 +1007,10 @@ class TrainDistillTest(unittest.TestCase):
 
     # 2. Setup strategy and trainer config
     strategy = mock.Mock()
-    strategy.compute_loss.side_effect = lambda s_out, t_out, labels, step=None: (jnp.sum(s_out.logits), {"aux": 1.0})
+    strategy.compute_loss.side_effect = lambda s_out, t_out, labels, step=None: (
+        jnp.sum(s_out.logits),
+        {"aux": 1.0},
+    )
     strategy.labels_fn.return_value = None
     strategy.student_forward_fn = lambda model, **kw: distillation_utils.DistillationForwardOutput(
         logits=model(kw["input_tokens"])
@@ -1139,13 +1202,19 @@ class TrainDistillTest(unittest.TestCase):
     mock_student_cfg.per_device_batch_size = 1
     mock_student_cfg.max_target_length = 16
     mock_student_cfg.gradient_accumulation_steps = 1
+    mock_student_cfg.enable_goodput_recording = False
+    mock_student_cfg.monitor_goodput = False
 
     mock_teacher_cfg = mock.Mock()
     mock_teacher_cfg.vocab_size = 32000
     mock_teacher_cfg.per_device_batch_size = 1
     mock_teacher_cfg.max_target_length = 16
     mock_teacher_cfg.gradient_accumulation_steps = 1
-    mock_pyconfig_init.side_effect = [mock_global, mock_student_cfg, mock_teacher_cfg]
+    mock_pyconfig_init.side_effect = [
+        mock_global,
+        mock_student_cfg,
+        mock_teacher_cfg,
+    ]
 
     # 2. Model Loading
     mock_student_model = mock.Mock()
@@ -1249,13 +1318,19 @@ class TrainDistillTest(unittest.TestCase):
     mock_student_cfg.per_device_batch_size = 1
     mock_student_cfg.max_target_length = 16
     mock_student_cfg.gradient_accumulation_steps = 1
+    mock_student_cfg.enable_goodput_recording = False
+    mock_student_cfg.monitor_goodput = False
 
     mock_teacher_cfg = mock.Mock()
     mock_teacher_cfg.vocab_size = 32000
     mock_teacher_cfg.per_device_batch_size = 1
     mock_teacher_cfg.max_target_length = 16
     mock_teacher_cfg.gradient_accumulation_steps = 1
-    mock_pyconfig_init.side_effect = [mock_global, mock_student_cfg, mock_teacher_cfg]
+    mock_pyconfig_init.side_effect = [
+        mock_global,
+        mock_student_cfg,
+        mock_teacher_cfg,
+    ]
 
     mock_student_model = mock.Mock()
     mock_teacher_model = mock.Mock()
@@ -1278,7 +1353,11 @@ class TrainDistillTest(unittest.TestCase):
     self.assertIs(model_bundle.student_model, mock_student_model)
     self.assertIs(model_bundle.teacher_model, mock_teacher_model)
 
-  @mock.patch.object(distillation_utils, "calculate_distillation_tflops_per_device", return_value=(0.0, 0.0, 0.0))
+  @mock.patch.object(
+      distillation_utils,
+      "calculate_distillation_tflops_per_device",
+      return_value=(0.0, 0.0, 0.0),
+  )
   def test_student_freeze_param_filter(self, _mock_tflops):
     """Verifies that student_freeze_param_filter correctly freezes specified parameters."""
 
@@ -1308,7 +1387,10 @@ class TrainDistillTest(unittest.TestCase):
 
     # 3. Setup Strategy and TrainingConfig
     strategy = mock.Mock()
-    strategy.compute_loss.side_effect = lambda s_out, t_out, labels, step=None: (jnp.sum(s_out.logits), {"aux": 1.0})
+    strategy.compute_loss.side_effect = lambda s_out, t_out, labels, step=None: (
+        jnp.sum(s_out.logits),
+        {"aux": 1.0},
+    )
     strategy.create_labels.return_value = None
     strategy.student_forward_fn = lambda model, **kw: distillation_utils.DistillationForwardOutput(
         logits=model(kw["input_tokens"])
@@ -1403,6 +1485,130 @@ class TrainDistillTest(unittest.TestCase):
       argv = ["train_distill.py", "/does/not/exist.yml"]
       # Must not raise — failures here should not kill training.
       train_distill._save_run_manifest(argv, config)  # pylint: disable=protected-access
+
+  def _run_train_distill_with_goodput(self, enable_goodput_recording: bool):
+    """Helper to run train_distill with mocked components and goodput_recorder."""
+    devices = jax.devices()[:1]
+    mock_recorder = mock.MagicMock()
+
+    mock_student_cfg = mock.Mock()
+    mock_student_cfg.vocab_size = 32000
+    mock_student_cfg.mesh_axes = ("data",)
+    mock_student_cfg.dataset_type = "grain"
+    mock_student_cfg.data_sharding = ("fsdp",)
+    mock_student_cfg.learning_rate = 1e-4
+    mock_student_cfg.warmup_steps_fraction = 0.1
+    mock_student_cfg.learning_rate_final_fraction = 0.1
+    mock_student_cfg.steps = 10
+    mock_student_cfg.checkpoint_period = 5
+    mock_student_cfg.gradient_clipping_threshold = 0.0
+    mock_student_cfg.eval_interval = -1
+    mock_student_cfg.gradient_accumulation_steps = 1
+    mock_student_cfg.global_batch_size = 8
+    mock_student_cfg.distill_temperature = 1.0
+    mock_student_cfg.distill_alpha = 0.5
+    mock_student_cfg.distill_beta = 0.0
+    mock_student_cfg.distill_layer_indices = None
+    mock_student_cfg.distill_feature_loss_type = "cosine"
+    mock_student_cfg.use_sft = False
+    mock_student_cfg.enable_dropout = False
+    mock_student_cfg.learn_to_init_mode = False
+    mock_student_cfg.distill_weights_copy_map = {}
+    mock_student_cfg.distill_student_weights_share_map = {}
+    mock_student_cfg.get_keys.return_value = {}
+    mock_student_cfg.student_params_to_update = []
+    mock_student_cfg.distill_alpha_end = None
+    mock_student_cfg.distill_alpha_schedule = "constant"
+    mock_student_cfg.distill_temperature_end = None
+    mock_student_cfg.distill_temperature_schedule = "constant"
+    mock_student_cfg.distill_beta_end = None
+    mock_student_cfg.distill_beta_schedule = "constant"
+    mock_student_cfg.max_num_checkpoints_to_keep = 1
+    mock_student_cfg.async_checkpointing = False
+    mock_student_cfg.profiler = "none"
+    mock_student_cfg.tensorboard_dir = ""
+    mock_student_cfg.checkpoint_dir = ""
+    mock_student_cfg.log_period = 10
+    mock_student_cfg.save_checkpoint_on_completion = False
+    mock_student_cfg.logical_axis_rules = []
+    mock_student_cfg.enable_goodput_recording = enable_goodput_recording
+    mock_student_cfg.monitor_goodput = False
+    mock_student_cfg.goodput_job_name = "test-distill-job"
+    mock_student_cfg.run_name = "test-distill-run"
+
+    mock_teacher_cfg = mock.Mock()
+    mock_teacher_cfg.vocab_size = 32000
+
+    def fake_create_recorder(cfg):
+      return mock_recorder if cfg.enable_goodput_recording else None
+
+    with (
+        mock.patch.object(
+            train_distill,
+            "create_goodput_recorder",
+            side_effect=fake_create_recorder,
+        ),
+        mock.patch.object(
+            train_distill.maxtext_utils,
+            "create_device_mesh",
+            return_value=np.array(devices),
+        ),
+        mock.patch.object(
+            train_distill.tokenizer,
+            "build_tokenizer",
+            return_value=mock.Mock(pad_id=0),
+        ),
+        mock.patch.object(train_distill, "get_maxtext_model", return_value=mock.Mock()),
+        mock.patch.object(
+            train_distill.input_pipeline_interface,
+            "create_data_iterator",
+            return_value=(None, None),
+        ),
+        mock.patch.object(train_distill, "MaxTextDistillationTrainer") as mock_trainer_cls,
+    ):
+      mock_trainer_instance = mock_trainer_cls.return_value
+      mock_trainer_instance._train_steps = 0
+      mock_trainer_instance.with_gen_model_input_fn.return_value = mock_trainer_instance
+
+      def fake_train(train_iter, eval_iter):  # pylint: disable=unused-argument
+        hooks_arg = mock_trainer_instance.with_training_hooks.call_args[0][0]
+        self.assertIsInstance(hooks_arg, train_distill.BaseTrainingHooks)
+        hooks_arg.on_train_start(mock.Mock(train_steps=0))
+        hooks_arg.on_train_step_start(mock.Mock(train_steps=0))
+        hooks_arg.on_train_step_end(mock.Mock(train_steps=1), train_step=1, train_loss=1.0)
+        hooks_arg.on_train_step_start(mock.Mock(train_steps=1))
+        hooks_arg.on_train_step_end(mock.Mock(train_steps=2), train_step=2, train_loss=0.8)
+        hooks_arg.on_train_end(mock.Mock(train_steps=2))
+
+      mock_trainer_instance.train.side_effect = fake_train
+
+      train_distill.train_distill(
+          mock_student_cfg,
+          mock_teacher_cfg,
+          is_offline=True,
+          offline_data_dir="gs://dummy",
+      )
+
+    return mock_recorder
+
+  def test_train_distill_goodput_enabled(self):
+    """Verifies train_distill with enable_goodput_recording=True records lifecycle and step events."""
+    mock_recorder = self._run_train_distill_with_goodput(enable_goodput_recording=True)
+    mock_recorder.record_job_start_time.assert_called_once()
+    mock_recorder.record_tpu_init_start_time.assert_called_once()
+    mock_recorder.record_tpu_init_end_time.assert_called_once()
+    mock_recorder.record_training_preparation_start_time.assert_called_once()
+    mock_recorder.record_training_preparation_end_time.assert_called_once()
+    self.assertEqual(
+        mock_recorder.record_step_start_time.call_args_list,
+        [mock.call(0), mock.call(1)],
+    )
+    mock_recorder.record_job_end_time.assert_called_once()
+
+  def test_train_distill_goodput_disabled(self):
+    """Verifies train_distill with enable_goodput_recording=False performs zero recorder calls."""
+    mock_recorder = self._run_train_distill_with_goodput(enable_goodput_recording=False)
+    self.assertEqual(len(mock_recorder.method_calls), 0)
 
 
 if __name__ == "__main__":

@@ -72,11 +72,19 @@ from tunix.rl.rollout import base_rollout
 from tunix.rl.grpo.grpo_learner import GrpoConfig, GrpoLearner
 from tunix.sft import metrics_logger, profiler
 
-
 os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
 from maxtext.common.common_types import DecoderBlockType
 from maxtext.configs import pyconfig, types
+from maxtext.common.goodput import (
+    GoodputEvent,
+    RECORD_JOB_END_TIME,
+    RECORD_JOB_START_TIME,
+    create_goodput_recorder,
+    maybe_monitor_goodput,
+    maybe_record_goodput,
+    record_goodput,
+)
 from maxtext.utils.globals import MAXTEXT_CONFIGS_DIR
 from maxtext.integration.vllm.maxtext_vllm_rollout import MaxTextVllmRollout
 from maxtext.trainers.post_train.rl.evaluate_rl import evaluate
@@ -84,7 +92,6 @@ from maxtext.trainers.post_train.rl import utils_rl
 from maxtext.input_pipeline.instruction_data_processing import load_data_template_from_file
 from maxtext.utils import max_logging, max_utils, model_creation_utils
 from maxtext.utils.model_creation_utils import get_rollout_kwargs_for_parallelism
-
 
 _RECURRENT_ROLLOUT_DECODER_BLOCKS = frozenset((DecoderBlockType.QWEN3_NEXT, DecoderBlockType.QWEN3_5))
 
@@ -199,14 +206,30 @@ def prepare_datasets(
     train_dataset = (
         grain.MapDataset.source(splits["train"])
         .shuffle(seed=trainer_config.data_shuffle_seed)
-        .map(lambda x: _process_data(trainer_config.dataset_name, model_tokenizer, template_config, trainer_config, x))
+        .map(
+            lambda x: _process_data(
+                trainer_config.dataset_name,
+                model_tokenizer,
+                template_config,
+                trainer_config,
+                x,
+            )
+        )
     )
 
     if trainer_config.num_test_batches > 0:
       test_dataset = (
           grain.MapDataset.source(splits["validation"])
           .shuffle(seed=trainer_config.data_shuffle_seed)
-          .map(lambda x: _process_data(trainer_config.dataset_name, model_tokenizer, template_config, trainer_config, x))
+          .map(
+              lambda x: _process_data(
+                  trainer_config.dataset_name,
+                  model_tokenizer,
+                  template_config,
+                  trainer_config,
+                  x,
+              )
+          )
       )
   else:
     if not eval_dataset_name:
@@ -221,7 +244,15 @@ def prepare_datasets(
     train_dataset = (
         grain.MapDataset.source(train_dataset)
         .shuffle(seed=trainer_config.data_shuffle_seed)
-        .map(lambda x: _process_data(trainer_config.dataset_name, model_tokenizer, template_config, trainer_config, x))
+        .map(
+            lambda x: _process_data(
+                trainer_config.dataset_name,
+                model_tokenizer,
+                template_config,
+                trainer_config,
+                x,
+            )
+        )
     )
 
     if trainer_config.num_test_batches > 0:
@@ -234,7 +265,15 @@ def prepare_datasets(
       test_dataset = (
           grain.MapDataset.source(test_dataset)
           .shuffle(seed=trainer_config.data_shuffle_seed)
-          .map(lambda x: _process_data(eval_dataset_name, model_tokenizer, template_config, trainer_config, x))
+          .map(
+              lambda x: _process_data(
+                  eval_dataset_name,
+                  model_tokenizer,
+                  template_config,
+                  trainer_config,
+                  x,
+              )
+          )
       )
 
   def _filter_long_prompts(x):
@@ -367,7 +406,8 @@ def create_rl_components(  # pylint: disable=too-many-positional-arguments
   # Setup checkpointing
   if trainer_config.enable_checkpointing:
     checkpointing_options = ocp.CheckpointManagerOptions(
-        save_interval_steps=trainer_config.checkpoint_period, max_to_keep=trainer_config.max_num_checkpoints_to_keep
+        save_interval_steps=trainer_config.checkpoint_period,
+        max_to_keep=trainer_config.max_num_checkpoints_to_keep,
     )
     checkpoint_dir = trainer_config.checkpoint_dir
   else:
@@ -382,7 +422,8 @@ def create_rl_components(  # pylint: disable=too-many-positional-arguments
 
   # Setup metrics logging
   metrics_logging_options = metrics_logger.MetricsLoggerOptions(
-      log_dir=trainer_config.tensorboard_dir, flush_every_n_steps=trainer_config.log_period
+      log_dir=trainer_config.tensorboard_dir,
+      flush_every_n_steps=trainer_config.log_period,
   )
 
   profiler_options = None
@@ -579,7 +620,9 @@ def create_rl_components(  # pylint: disable=too-many-positional-arguments
           f"Data template is required for AgenticGRPOLearner but failed to load from {trainer_config.data_template_path}"
       )
     chat_parser = utils_rl.MaxTextChatParser(
-        model_tokenizer=model_tokenizer, template_config=template_config, tmvp_config=trainer_config
+        model_tokenizer=model_tokenizer,
+        template_config=template_config,
+        tmvp_config=trainer_config,
     )
     rl_trainer = AgenticGrpoLearner(
         rl_cluster=rl_cluster,
@@ -648,17 +691,37 @@ def rl_train(argv: Sequence[str], kwargs: dict):
     trainer_devices: JAX devices for the trainer.
     sampler_devices: JAX devices for the sampler.
   """
-  _rl_train_impl(argv, kwargs)
-
-
-def _rl_train_impl(argv: Sequence[str], kwargs: dict):
-  """rl_train execution body."""
   trainer_config, sampler_config, trainer_devices, sampler_devices = model_creation_utils.setup_configs_and_devices(
       argv,
       kwargs,
       config_class=types.RLConfig,
   )
+  goodput_recorder = create_goodput_recorder(trainer_config)
+  record_goodput(goodput_recorder, RECORD_JOB_START_TIME)
+  _job_completed_gracefully = False
+  try:
+    with maybe_monitor_goodput(trainer_config):
+      _rl_train_impl(
+          trainer_config,
+          sampler_config,
+          trainer_devices,
+          sampler_devices,
+          goodput_recorder,
+      )
+      _job_completed_gracefully = True
+  finally:
+    if _job_completed_gracefully:
+      record_goodput(goodput_recorder, RECORD_JOB_END_TIME)
 
+
+def _rl_train_impl(
+    trainer_config: Any,
+    sampler_config: Any,
+    trainer_devices: Any,
+    sampler_devices: Any,
+    goodput_recorder: Any = None,
+):
+  """rl_train execution body."""
   # Create model tokenizer first so we can plumb its pad_id into the model
   # adapter (used to synthesize segment_ids that mask pad positions from
   # attention — without this the trainer attends to pad tokens and produces
@@ -669,13 +732,16 @@ def _rl_train_impl(argv: Sequence[str], kwargs: dict):
   )
   configure_tokenizer_chat_template(model_tokenizer, trainer_config)
 
-  reference_model, reference_mesh, actor_model, actor_mesh, rollout_mesh = model_creation_utils.create_models_and_meshes(
-      trainer_config,
-      sampler_config,
-      trainer_devices,
-      sampler_devices,
-      tokenizer_pad_id=model_tokenizer.pad_token_id,
-  )
+  with maybe_record_goodput(goodput_recorder, GoodputEvent.TPU_INIT):
+    reference_model, reference_mesh, actor_model, actor_mesh, rollout_mesh = (
+        model_creation_utils.create_models_and_meshes(
+            trainer_config,
+            sampler_config,
+            trainer_devices,
+            sampler_devices,
+            tokenizer_pad_id=model_tokenizer.pad_token_id,
+        )
+    )
 
   if not trainer_config.debug:
     # Apply filter to suppress noisy logs
@@ -714,17 +780,18 @@ def _rl_train_impl(argv: Sequence[str], kwargs: dict):
     max_logging.log(f"Policy mesh shape: {actor_mesh.shape}")
     max_logging.log(f"Rollout_mesh shape: {rollout_mesh.shape}")
 
-  rl_cluster, rl_trainer, _, reward_fns = create_rl_components(
-      trainer_config,
-      sampler_config,
-      sampler_devices,
-      actor_model,
-      actor_mesh,
-      reference_model,
-      reference_mesh,
-      rollout_mesh,
-      model_tokenizer,
-  )
+  with maybe_record_goodput(goodput_recorder, GoodputEvent.TRAINING_PREPARATION):
+    rl_cluster, rl_trainer, _, reward_fns = create_rl_components(
+        trainer_config,
+        sampler_config,
+        sampler_devices,
+        actor_model,
+        actor_mesh,
+        reference_model,
+        reference_mesh,
+        rollout_mesh,
+        model_tokenizer,
+    )
 
   # Run evaluation before training
   if trainer_config.num_test_batches > 0:
@@ -757,7 +824,13 @@ def _rl_train_impl(argv: Sequence[str], kwargs: dict):
 
   # Wire intermediate eval: fire greedy `evaluate(...)` every `eval_interval`
   # outer steps. No-op when eval_interval <= 0 or num_test_batches <= 0.
-  utils_rl.install_training_hooks(rl_cluster, trainer_config, test_dataset, reward_fns)
+  utils_rl.install_training_hooks(
+      rl_cluster,
+      trainer_config,
+      test_dataset,
+      reward_fns,
+      goodput_recorder=goodput_recorder,
+  )
 
   max_logging.warning("Starting RL training...")
   rl_trainer.train(train_dataset)

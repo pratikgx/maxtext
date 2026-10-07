@@ -108,7 +108,10 @@ class BaseHooksTest(unittest.TestCase):
     metrics = self._read_logged_metrics(num_expected=1)[0]
     self.assertEqual(metrics["step"], 1)
     self.assertAlmostEqual(metrics["learning/loss"], 5.0)
-    self.assertEqual(metrics["learning/total_weights"], (jax.device_count() * self.config.max_target_length))
+    self.assertEqual(
+        metrics["learning/total_weights"],
+        (jax.device_count() * self.config.max_target_length),
+    )
 
   def test_training_hooks_for_eval_step(self):
     self.mock_train_ctx.data_hooks.eval_batch = self.expected_batch
@@ -123,7 +126,10 @@ class BaseHooksTest(unittest.TestCase):
     self.assertAlmostEqual(metrics["eval/total_loss"], 10.0)
     self.assertAlmostEqual(metrics["eval/avg_loss"], 5.0)
     self.assertAlmostEqual(metrics["eval/avg_perplexity"], np.exp(5.0), places=2)
-    self.assertEqual(metrics["eval/total_weights"], jax.device_count() * self.config.max_target_length * total_eval_steps)
+    self.assertEqual(
+        metrics["eval/total_weights"],
+        jax.device_count() * self.config.max_target_length * total_eval_steps,
+    )
 
   def test_preaveraged_eval_loss_is_not_divided_again(self):
     training_hooks = PreaveragedDummyTrainingHooks(
@@ -149,6 +155,21 @@ class BaseHooksTest(unittest.TestCase):
   def test_on_train_end_asserts_if_on_train_start_not_called(self):
     with self.assertRaises(AssertionError):
       self.training_hooks.on_train_end(self.mock_train_ctx)
+
+  def test_base_training_hooks_goodput_only_mode(self):
+    mock_recorder = MagicMock()
+    mock_cfg = MagicMock()
+    mock_cfg.enable_goodput_recording = True
+    hooks = BaseTrainingHooks(mock_cfg, goodput_recorder=mock_recorder)
+    self.assertIsNone(hooks.metric_logger)
+    self.mock_train_ctx.train_steps = 3
+    hooks.on_train_start(self.mock_train_ctx)
+    hooks.on_train_step_start(self.mock_train_ctx)
+    hooks.on_train_step_end(self.mock_train_ctx, train_step=4, train_loss=1.5)
+    hooks.on_eval_step_start(self.mock_train_ctx)
+    hooks.on_eval_step_end(self.mock_train_ctx, eval_loss=1.2)
+    hooks.on_train_end(self.mock_train_ctx)
+    mock_recorder.record_step_start_time.assert_called_once_with(3)
 
 
 if __name__ == "__main__":
